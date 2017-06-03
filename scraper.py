@@ -4,6 +4,7 @@ import csv
 import requests
 import re
 import logging
+import time
 from bs4 import BeautifulSoup
 from pprint import pprint
 
@@ -99,14 +100,14 @@ class CityScrape:
 
     def set_logging_config(self):
         # logs to file
-        logging.basicConfig(level=logging.INFO,
+        logging.basicConfig(level=logging.DEBUG,
                             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
                             datefmt='%m-%d %H:%M',
                             filename='logfile.log',
                             filemode='w')
         # define a Handler which writes INFO messages or higher to the sys.stderr
         self.console = logging.StreamHandler()
-        self.console.setLevel(logging.INFO)
+        self.console.setLevel(logging.DEBUG)
         # set a format which is simpler for console use
         formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
         # tell the handler to use this format
@@ -158,26 +159,36 @@ class CityScrape:
         """ Scrape the data for a specific listing
             :returns: listing data to be saved to csv or txt file
         """
-        logging.info("Getting data for {}".format(self.get_base_url() + href))
+        logging.debug("Getting data for {}".format(self.get_base_url() + href))
         soup = self.request_listing_data(href)
-        self.get_all_reviews_from_listing(soup)
+        self.get_all_reviews_from_listing(soup, href)
         # TODO: parse and scrape all the relevant data from the page
         return soup.head.title
 
-    def get_all_reviews_from_listing(self, soup):
-        logging.info("Finding the listing data we need to make the ajax call for the reviews")
-        # find the data we need to make the Ajax call ourselves
-        # use the select method here because we want multiple classes
-        data_spu = soup.select('li.dropdown.favorite-button.js-favoriteButtonView')
-        # gets the "vrbo-XXXXXX-XXXXXXX' or 'trips-XXXXXX-XXXXXXX'
-        # data from the page
-        apiListingID = data_spu[0]['data-spu']
+    def get_all_reviews_from_listing(self, soup, href):
+        """ Makes an api call to the website to get the json of all the reviews
+        """
+        logging.debug("Finding the listing data we need to make the ajax call for the reviews")
+        notSuccessful = True
+        while notSuccessful:
+            # find the data we need to make the ajax api call ourselves
+            # use the select method here because we want multiple classes
+            data_spu = soup.select('li.dropdown.favorite-button.js-favoriteButtonView')
+            try:
+                # finds the "vrbo-XXXXXX-XXXXXXX' or 'trips-XXXXXX-XXXXXXX'
+                apiListingID = data_spu[0]['data-spu']
+                notSuccessful = False
+            except IndexError:
+                logging.error("Failed to find the api-id information for a listing. Probably didn't have enough time for page to load. Retrying...")
+                time.sleep(1)
+                soup = self.request_listing_data(href)
+
         self.request_all_review_data(apiListingID)
 
     def request_all_review_data(self, apiListingId):
         """ Gets the json data for all the reviews from a listing """
         apiReviewURL = self.get_ajax_url().format(apiListingId)
-        logging.info("Getting all review data for {}".format(apiReviewURL))
+        logging.debug("Getting all review data for {}".format(apiReviewURL))
         apiParams = {"pageNum": 1, "pageSize": self.LARGE_PAGE_SIZE}
         reviews = requests.get(apiReviewURL, params=apiParams)
         reviewJson = reviews.json()
@@ -195,7 +206,7 @@ class CityScrape:
         """ Fetches the page for a specific listing
             :returns: a BeautifulSoup object of the listing page
         """
-        logging.info("Fetching listing for {}".format(self.get_base_url() + href))
+        logging.debug("Fetching listing for {}".format(self.get_base_url() + href))
         resp = requests.get(self.get_base_url() + href)
         return self.soupify(resp)
 
@@ -203,7 +214,7 @@ class CityScrape:
         """ Gets a specific page number of the results for a city
             :returns: a BeautifulSoup object of the results page
         """
-        logging.info("Getting page #{} of results for {}, {}".format(
+        logging.debug("Getting page #{} of results for {}, {}".format(
                 pageNum, city, state))
         cityParam = {"q": "{}, {}, USA".format(city, state), "page": pageNum}
         resp = requests.get(self.get_base_search_url(), params=cityParam)
@@ -232,7 +243,7 @@ class CityScrape:
 
     def get_page_count(self, city, state):
         """ Returns the number of pages of results for a city """
-        logging.info("Determining page count for {}, {}".format(city, state))
+        logging.debug("Determining page count for {}, {}".format(city, state))
         soup = self.request_city_listing(city, state)
         scripts = soup.find_all('script')
         scripts = list(filter(lambda script: script.attrs == {} and 'pageCount' in script.text,
@@ -244,7 +255,7 @@ class CityScrape:
         assert(len(pageCountNum) != 0 and "Didn't find pageCount in script tag: {}, {}".format(city, state))
         # findall returns a list, so we want the first item
         # in the list and make it an int
-        logging.info("Page count is {}".format(pageCountNum[0]))
+        logging.debug("Page count is {}".format(pageCountNum[0]))
         return int(pageCountNum[0])
 
 

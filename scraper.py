@@ -1,9 +1,11 @@
 #! /usr/bin/env python3.5
 
 import csv
+import json
+import logging
+import os.path
 import requests
 import re
-import logging
 import time
 from bs4 import BeautifulSoup
 from pprint import pprint
@@ -15,8 +17,9 @@ class CityScrape:
     BASE_SEARCH_URL = BASE_URL + "/vacation-rentals"
     AJAX_URL = BASE_URL + "/ajax/review/unit/{}/getAllReviews"
     # if this number is greater than the
-    # number of reviews, we will fetch them all
+    # number of reviews for a listing, we will fetch them all
     LARGE_PAGE_SIZE = 100000
+
 
     CITY_LIST = [ ("New York", "NY",),
                   ("Bridgeport", "CT",),
@@ -97,10 +100,47 @@ class CityScrape:
 
     def __init__(self):
         self.set_logging_config()
+        self.set_csv_config()
+
+    def set_csv_config(self):
+        listing_fieldnames = [ 'listing_id', 'listing_title', 'latitude',
+                'longitude', 'location_name', 'number_reviews',
+                'average_rating', 'average_nightly_price', 'min_stay', 'sleeps',
+                'bedrooms', 'bathrooms', 'property_type', 'internet',
+                'member_since', 'response_time', 'response_rate',
+                'calendar_last_updated', 'type', 'floor', 'sq_footage',
+                'max_occupancy', 'building_type']
+
+        exists = False
+        if os.path.isfile('listing.csv'):
+            exists = True
+
+        listing_csv = open('listing.csv', 'a')
+        self.listing_csv = csv.DictWriter(listing_csv,
+                fieldnames=listing_fieldnames, quoting=csv.QUOTE_MINIMAL)
+
+        if not exists:
+            self.listing_csv.writeheader()
+
+
+        review_fieldnames = ['listing_id', 'total_number_reviews', 'n_review',
+                'reviewer_name', 'title', 'stars', 'stayed', 'source',
+                'submitted']
+        exists = False
+
+        if os.path.isfile('review.csv'):
+            exists = True
+
+        review_csv = open('review.csv', 'a')
+        self.review_csv = csv.DictWriter(review_csv,
+                fieldnames=review_fieldnames, quoting=csv.QUOTE_MINIMAL)
+
+        if not exists:
+            self.review_csv.writeheader()
 
     def set_logging_config(self):
         # logs to file
-        logging.basicConfig(level=logging.DEBUG,
+        logging.basicConfig(level=logging.INFO,
                             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
                             datefmt='%m-%d %H:%M',
                             filename='logfile.log',
@@ -140,35 +180,75 @@ class CityScrape:
         pageCount = self.get_page_count(city, state)
         for page in range(1, pageCount + 1):
             listingHrefs += self.get_city_listing(city, state, page)
-            # TODO: remove when done testing
-            break
+            if page > 2:
+                break
         return listingHrefs
 
     def get_all_listing_data_for_city(self, listingHrefs):
-        data = []
         for href in listingHrefs:
-            data.append(self.get_data_for_listing(href))
-            # TODO: remove when done testing
-            break
-
-        # TODO: write data to relevant file format/structure
-        logging.debug("Writing data to file...")
-        logging.debug(data)
+            listing_data = self.get_data_for_listing(href)
+            self.listing_csv.writerow(listing_data)
+            logging.info("Writing listing data to file")
+            logging.debug(listing_data)
 
     def get_data_for_listing(self, href):
         """ Scrape the data for a specific listing
             :returns: listing data to be saved to csv or txt file
         """
-        logging.debug("Getting data for {}".format(self.get_base_url() + href))
+        logging.info("Getting data for {}".format(self.get_base_url() + href))
         soup = self.request_listing_data(href)
-        self.get_all_reviews_from_listing(soup, href)
-        # TODO: parse and scrape all the relevant data from the page
-        return soup.head.title
+        soup = self.get_loaded_page(soup, href)
+        numReviews = self.get_all_reviews_from_listing(soup, href)
+        row = {}
+        LISTING_ATTRS = {
+            'listing_id': "href[1:]",
+            'listing_title':"soup.find('span', class_='listing-headline-text').text.strip()",
+            'latitude':"float(soup.find('meta', attrs={'property': 'homeaway:location:latitude'})['content'])",
+            'longitude':"float(soup.find('meta', attrs={'property': 'homeaway:location:longitude'})['content'])",
+            'location_name':"soup.find('a', class_='js-breadcrumbLink').text.strip()",
+            'number_reviews':"numReviews",
+            'average_rating':"float(re.search('(\d*\.\d*)', soup.find('div', class_='rating')['title']).group(0))",
+            'average_nightly_price':"int(soup.find('div', class_='price-large').text.strip()[1:])",
+            'min_stay':"int(re.search('\d+', soup.find(text = 'Minimum Stay').parent.nextSibling.nextSibling.text).group())",
+            'sleeps':"int(soup.find(text = 'Sleeps').parent.nextSibling.text)",
+            'bedrooms':"soup.find(text = 'Bedrooms').parent.nextSibling.nextSibling.text",
+            'bathrooms':"int(soup.find(text = 'Bathrooms').parent.nextSibling.text)",
+            'property_type':"soup.find('div', id='propertyType').nextSibling.nextSibling.find('li').text.strip()",
+            'internet':"'Yes' if soup.find(text=re.compile('Internet')) else 'No'",
+            'member_since':"re.search('(\d+)', soup.find('div', class_='advertiser-date').text.strip()).group(1)",
+            'response_time':"soup.find(text=re.compile('response time', re.IGNORECASE)).parent.find('strong').text",
+            'response_rate':"soup.find(text=re.compile('Response rate')).parent.find('strong').text",
+            'calendar_last_updated':"soup.find(text=re.compile('Calendar last updated')).parent.find('strong').text",
+            'type':"soup.find('div', id='propertyType').nextSibling.nextSibling.find('li').text.strip()",
+            'floor':"re.search('(\d+)', soup.find('div', id='propertyType').nextSibling.nextSibling.nextSibling.nextSibling.find('li').text).group(1)",
+            'sq_footage':"re.search('\d+', soup.find('div', text='Floor Area:').nextSibling.nextSibling.find('li').text).group(0)",
+            'max_occupancy':"int(soup.find(text=re.compile('Max. occupancy')).parent.find('span').text.strip())",
+            'building_type':"soup.find('div', id='buildingtype').nextSibling.nextSibling.find('li').text.strip()"
+        }
+
+        for attr, code in LISTING_ATTRS.items():
+            try:
+                row[attr] = eval(code)
+            except:
+                logging.error("Could not retrieve {} attribute!!".format(attr))
+                row[attr] = ''
+
+        return row
 
     def get_all_reviews_from_listing(self, soup, href):
         """ Makes an api call to the website to get the json of all the reviews
         """
-        logging.debug("Finding the listing data we need to make the ajax call for the reviews")
+        logging.info("Finding the listing data we need to make the ajax call for the reviews")
+        soup = self.get_loaded_page(soup, href)
+        data_spu = soup.select('li.dropdown.favorite-button.js-favoriteButtonView')
+        apiListingID = data_spu[0]['data-spu']
+
+        return self.request_all_review_data(apiListingID, href)
+
+    def get_loaded_page(self, soup, href):
+        """ Sometimes it seems the page isn't fully loaded before being
+            returned, so we test again to make sure we get a fully loaded page
+        """
         notSuccessful = True
         while notSuccessful:
             # find the data we need to make the ajax api call ourselves
@@ -182,17 +262,34 @@ class CityScrape:
                 logging.error("Failed to find the api-id information for a listing. Probably didn't have enough time for page to load. Retrying...")
                 time.sleep(1)
                 soup = self.request_listing_data(href)
+        return soup
 
-        self.request_all_review_data(apiListingID)
 
-    def request_all_review_data(self, apiListingId):
+    def request_all_review_data(self, apiListingId, href):
         """ Gets the json data for all the reviews from a listing """
         apiReviewURL = self.get_ajax_url().format(apiListingId)
-        logging.debug("Getting all review data for {}".format(apiReviewURL))
+        logging.info("Getting all review data for {}".format(apiReviewURL))
         apiParams = {"pageNum": 1, "pageSize": self.LARGE_PAGE_SIZE}
         reviews = requests.get(apiReviewURL, params=apiParams)
-        reviewJson = reviews.json()
-        pprint(reviewJson)
+        reviewsJson = reviews.json()
+        for reviewNum, review in enumerate(reviewsJson['list']):
+            row = {}
+            # we use the first character through the end since it's a url
+            row['listing_id'] = href[1:]
+            row['total_number_reviews'] = reviewsJson['pagingContext']['totalResults']
+            row['n_review'] = reviewNum + 1 # adjust for zero indexed
+            row['reviewer_name'] = review['reviewer']['nickname']
+            row['title'] = review['headline']
+            row['stars'] = review['rating']
+            row['stayed'] = review['arrivalDate']
+            row['source'] = 'VRBO'
+            row['submitted'] = review['createdDate']
+            logging.debug(row)
+            self.review_csv.writerow(row)
+
+        logging.info("Wrote review data to file")
+
+        return reviewsJson['pagingContext']['totalResults']
 
     def get_city_listing(self, city, state, pageNum):
         """ Fetches and parses the listing hrefs for a page of
@@ -206,7 +303,7 @@ class CityScrape:
         """ Fetches the page for a specific listing
             :returns: a BeautifulSoup object of the listing page
         """
-        logging.debug("Fetching listing for {}".format(self.get_base_url() + href))
+        logging.info("Fetching listing for {}".format(self.get_base_url() + href))
         resp = requests.get(self.get_base_url() + href)
         return self.soupify(resp)
 
@@ -214,7 +311,7 @@ class CityScrape:
         """ Gets a specific page number of the results for a city
             :returns: a BeautifulSoup object of the results page
         """
-        logging.debug("Getting page #{} of results for {}, {}".format(
+        logging.info("Getting page #{} of results for {}, {}".format(
                 pageNum, city, state))
         cityParam = {"q": "{}, {}, USA".format(city, state), "page": pageNum}
         resp = requests.get(self.get_base_search_url(), params=cityParam)
@@ -243,7 +340,7 @@ class CityScrape:
 
     def get_page_count(self, city, state):
         """ Returns the number of pages of results for a city """
-        logging.debug("Determining page count for {}, {}".format(city, state))
+        logging.info("Determining page count for {}, {}".format(city, state))
         soup = self.request_city_listing(city, state)
         scripts = soup.find_all('script')
         scripts = list(filter(lambda script: script.attrs == {} and 'pageCount' in script.text,
@@ -255,7 +352,7 @@ class CityScrape:
         assert(len(pageCountNum) != 0 and "Didn't find pageCount in script tag: {}, {}".format(city, state))
         # findall returns a list, so we want the first item
         # in the list and make it an int
-        logging.debug("Page count is {}".format(pageCountNum[0]))
+        logging.info("Page count is {}".format(pageCountNum[0]))
         return int(pageCountNum[0])
 
 

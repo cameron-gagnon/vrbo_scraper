@@ -114,6 +114,8 @@ class CityScrape:
         self.config['info']['last_city_num'] = str(idx + 1)
         self.config['info']['last_city'] = city + ',' + state
         self.update_config_file()
+        # reset last href since we're in a new city
+        self.update_last_href_num(0, '')
 
     def update_last_href_num(self, idx, href):
         self.config['info']['last_href_num'] = str(idx + 1)

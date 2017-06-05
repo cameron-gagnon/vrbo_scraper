@@ -1,5 +1,6 @@
 #! /usr/bin/env python3.5
 
+import configparser
 import csv
 import json
 import logging
@@ -101,9 +102,31 @@ class CityScrape:
     def __init__(self):
         self.set_logging_config()
         self.set_csv_config()
+        self.read_config()
+
+    def read_config(self):
+        self.config = configparser.ConfigParser()
+        self.config.read('last_info.ini')
+        self.last_city_num = self.config.getint('info', 'last_city_num')
+        self.last_href_num = self.config.getint('info','last_href_num')
+
+    def update_last_city_num(self, idx, city, state):
+        self.config['info']['last_city_num'] = str(idx + 1)
+        self.config['info']['last_city'] = city + ',' + state
+        self.update_config_file()
+
+    def update_last_href_num(self, idx, href):
+        self.config['info']['last_href_num'] = str(idx + 1)
+        self.config['info']['last_href'] = str(href)
+        self.update_config_file()
+
+    def update_config_file(self):
+        with open('last_info.ini', 'w') as configfile:
+            self.config.write(configfile)
+
 
     def set_csv_config(self):
-        listing_fieldnames = [ 'listing_id', 'listing_title', 'latitude',
+        listing_fieldnames = ['listing_id', 'listing_title', 'latitude',
                 'longitude', 'location_name', 'number_reviews',
                 'average_rating', 'average_nightly_price', 'min_stay', 'sleeps',
                 'bedrooms', 'bathrooms', 'property_type', 'internet',
@@ -161,12 +184,14 @@ class CityScrape:
 
     def scrape(self):
         """ Goes through all the cities and collects data for each city """
-        for city, state in self.CITY_LIST:
+        for idx, locTuple in enumerate(self.CITY_LIST[self.last_city_num:]):
+            city = locTuple[0]
+            state = locTuple[1]
             # collects all the pages of results when searching for a city
             listingHrefs = self.get_all_listings_for_city(city, state)
             # visits each result to collect the data
             self.get_all_listing_data_for_city(listingHrefs)
-            break
+            self.update_last_city_num(idx + self.last_city_num, city, state)
 
     def get_all_listings_for_city(self, city, state):
         """ Determines how many pages of results there are for a city, and
@@ -180,16 +205,21 @@ class CityScrape:
         pageCount = self.get_page_count(city, state)
         for page in range(1, pageCount + 1):
             listingHrefs += self.get_city_listing(city, state, page)
-            if page > 2:
-                break
         return listingHrefs
 
     def get_all_listing_data_for_city(self, listingHrefs):
-        for href in listingHrefs:
+        # return because the last href we visited was the last
+        # one of the city
+        if self.last_href_num >= len(listingHrefs) - 1:
+            return
+
+        for idx, href in enumerate(listingHrefs[self.last_href_num:]):
             listing_data = self.get_data_for_listing(href)
             self.listing_csv.writerow(listing_data)
             logging.info("Writing listing data to file")
             logging.debug(listing_data)
+            # add one because it's 0 based indexing
+            self.update_last_href_num(idx + self.last_href_num, href)
 
     def get_data_for_listing(self, href):
         """ Scrape the data for a specific listing
@@ -270,7 +300,7 @@ class CityScrape:
         apiReviewURL = self.get_ajax_url().format(apiListingId)
         logging.info("Getting all review data for {}".format(apiReviewURL))
         apiParams = {"pageNum": 1, "pageSize": self.LARGE_PAGE_SIZE}
-        reviews = requests.get(apiReviewURL, params=apiParams)
+        reviews = self.request_url(apiReviewURL, params=apiParams)
         reviewsJson = reviews.json()
         for reviewNum, review in enumerate(reviewsJson['list']):
             row = {}
@@ -304,7 +334,7 @@ class CityScrape:
             :returns: a BeautifulSoup object of the listing page
         """
         logging.info("Fetching listing for {}".format(self.get_base_url() + href))
-        resp = requests.get(self.get_base_url() + href)
+        resp = self.request_url(self.get_base_url() + href)
         return self.soupify(resp)
 
     def request_city_listing(self, city, state, pageNum = 1):
@@ -314,7 +344,7 @@ class CityScrape:
         logging.info("Getting page #{} of results for {}, {}".format(
                 pageNum, city, state))
         cityParam = {"q": "{}, {}, USA".format(city, state), "page": pageNum}
-        resp = requests.get(self.get_base_search_url(), params=cityParam)
+        resp = self.request_url(self.get_base_search_url(), params=cityParam)
         return self.soupify(resp)
 
     def soupify(self, resp):
@@ -354,6 +384,24 @@ class CityScrape:
         # in the list and make it an int
         logging.info("Page count is {}".format(pageCountNum[0]))
         return int(pageCountNum[0])
+
+    def request_url(self, url, params=None):
+        notSuccessful = True
+        resp = None
+        while notSuccessful:
+            try:
+                resp = requests.get(url, timeout=5, allow_redirects=True, params=params)
+                notSuccessful = False
+            except ConnectionError:
+                logging.error("Could not get page {}. Re-trying...".format(url))
+                time.sleep(2)
+            except Exception as e:
+                logging.error("Unknown error occurred when requesting {}.  {}".format(url, e))
+                time.sleep(2)
+        return resp
+
+
+
 
 
 def main():

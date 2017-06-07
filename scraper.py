@@ -175,10 +175,9 @@ class CityScrape:
 
     def get_cur_city_filename(self, suffix):
         """ returns the path/name of the current city's file """
-        city, state = self.CITY_LIST[self.last_city_num]
-        city = city.replace(' ', '_')
-        directory = "{city}_{state}".format(city=city, state=state)
-        filename = "{city}_{state}_{type}.csv".format(city=city, state=state,
+        city = self.cur_city.replace(' ', '_')
+        directory = "{city}_{state}".format(city=city, state=self.cur_state)
+        filename = "{city}_{state}_{type}.csv".format(city=city, state=self.cur_state,
                 type=suffix)
         return directory, directory + "/" + filename
 
@@ -244,6 +243,7 @@ class CityScrape:
             logging.debug(listing_data)
             # add one because it's 0 based indexing
             self.update_last_href_num(idx + self.last_href_num, href)
+            break
 
     def get_data_for_listing(self, href):
         """ Scrape the data for a specific listing

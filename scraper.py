@@ -101,7 +101,6 @@ class CityScrape:
 
     def __init__(self):
         self.set_logging_config()
-        self.set_csv_config()
         self.read_config()
 
     def read_config(self):
@@ -110,9 +109,9 @@ class CityScrape:
         self.last_city_num = self.config.getint('info', 'last_city_num')
         self.last_href_num = self.config.getint('info','last_href_num')
 
-    def update_last_city_num(self, idx, city, state):
-        self.config['info']['last_city_num'] = str(idx + 1)
-        self.config['info']['last_city'] = city + ',' + state
+    def update_last_city_num(self, idx):
+        self.config['info']['last_city_num'] = str(idx + 1 + self.last_city_num)
+        self.config['info']['last_city'] = self.cur_city + ',' + self.cur_state
         self.update_config_file()
         # reset last href since we're in a new city
         self.update_last_href_num(0, '')
@@ -126,42 +125,62 @@ class CityScrape:
         with open('last_info.ini', 'w') as configfile:
             self.config.write(configfile)
 
-
-    def set_csv_config(self):
+    def update_csvs(self):
         listing_fieldnames = ['listing_id', 'listing_title', 'latitude',
                 'longitude', 'location_name', 'number_reviews',
-                'average_rating', 'average_nightly_price', 'min_stay', 'sleeps',
-                'bedrooms', 'bathrooms', 'property_type', 'internet',
+                'average_rating', 'average_nightly_price', 'nightly',
+                'weekend_night', 'property_protection_fee', 'cleaning_fee',
+                'tax_rate', 'min_stay', 'sleeps', 'bedrooms',
+                'bathrooms', 'property_type', 'internet',
                 'member_since', 'response_time', 'response_rate',
                 'calendar_last_updated', 'type', 'floor', 'sq_footage',
-                'max_occupancy', 'building_type']
-
-        exists = False
-        if os.path.isfile('listing.csv'):
-            exists = True
-
-        listing_csv = open('listing.csv', 'a')
-        self.listing_csv = csv.DictWriter(listing_csv,
-                fieldnames=listing_fieldnames, quoting=csv.QUOTE_MINIMAL)
-
-        if not exists:
-            self.listing_csv.writeheader()
-
-
+                'max_occupancy', 'building_type', 'city']
         review_fieldnames = ['listing_id', 'total_number_reviews', 'n_review',
                 'reviewer_name', 'title', 'stars', 'stayed', 'source',
                 'submitted']
-        exists = False
 
-        if os.path.isfile('review.csv'):
+        self.listing_csv, self._listing_csv = self.create_or_open_file('listing', listing_fieldnames)
+        self.review_csv, self._review_csv = self.create_or_open_file('review', review_fieldnames)
+
+    def close_csvs(self):
+        """ closes the csv files used """
+        self._listing_csv.close()
+        self._review_csv.close()
+
+    def create_or_open_file(self, suffix, fieldnames):
+        """ creates or opens the csv files we need to use """
+        directory, full_file_path = self.get_cur_city_filename(suffix)
+
+        self.ensure_dir_is_created(directory)
+
+        exists = False
+        if os.path.exists(full_file_path):
             exists = True
 
-        review_csv = open('review.csv', 'a')
-        self.review_csv = csv.DictWriter(review_csv,
-                fieldnames=review_fieldnames, quoting=csv.QUOTE_MINIMAL)
+        file_ = open(full_file_path, 'a')
+
+        new_csv = csv.DictWriter(file_,
+                fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
 
         if not exists:
-            self.review_csv.writeheader()
+            new_csv.writeheader()
+
+        return new_csv, file_
+
+    def ensure_dir_is_created(self, directory):
+        try:
+            os.mkdir(directory)
+        except:
+            pass
+
+    def get_cur_city_filename(self, suffix):
+        """ returns the path/name of the current city's file """
+        city, state = self.CITY_LIST[self.last_city_num]
+        city = city.replace(' ', '_')
+        directory = "{city}_{state}".format(city=city, state=state)
+        filename = "{city}_{state}_{type}.csv".format(city=city, state=state,
+                type=suffix)
+        return directory, directory + "/" + filename
 
     def set_logging_config(self):
         # logs to file
@@ -187,15 +206,17 @@ class CityScrape:
     def scrape(self):
         """ Goes through all the cities and collects data for each city """
         for idx, locTuple in enumerate(self.CITY_LIST[self.last_city_num:]):
-            city = locTuple[0]
-            state = locTuple[1]
+            self.cur_city = locTuple[0]
+            self.cur_state = locTuple[1]
+            self.update_csvs()
             # collects all the pages of results when searching for a city
-            listingHrefs = self.get_all_listings_for_city(city, state)
+            listingHrefs = self.get_all_listings_for_cur_city()
             # visits each result to collect the data
             self.get_all_listing_data_for_city(listingHrefs)
-            self.update_last_city_num(idx + self.last_city_num, city, state)
+            self.update_last_city_num(idx)
+            self.close_csvs()
 
-    def get_all_listings_for_city(self, city, state):
+    def get_all_listings_for_cur_city(self):
         """ Determines how many pages of results there are for a city, and
             then goes through that many pages and collects the href of each
             listing
@@ -204,9 +225,10 @@ class CityScrape:
         listingHrefs = [] # will be a list of '/XXXXXXha' or '/XXXXXX' to visit
         # find out how many pages there are, and get all the listings
         # for all those pages
-        pageCount = self.get_page_count(city, state)
+        pageCount = self.get_page_count(self.cur_city, self.cur_state)
         for page in range(1, pageCount + 1):
-            listingHrefs += self.get_city_listing(city, state, page)
+            listingHrefs += self.get_city_listing(self.cur_city, self.cur_state, page)
+            break
         return listingHrefs
 
     def get_all_listing_data_for_city(self, listingHrefs):
@@ -255,7 +277,13 @@ class CityScrape:
             'floor':"re.search('(\d+)', soup.find('div', id='propertyType').nextSibling.nextSibling.nextSibling.nextSibling.find('li').text).group(1)",
             'sq_footage':"re.search('\d+', soup.find('div', text='Floor Area:').nextSibling.nextSibling.find('li').text).group(0)",
             'max_occupancy':"int(soup.find(text=re.compile('Max. occupancy')).parent.find('span').text.strip())",
-            'building_type':"soup.find('div', id='buildingtype').nextSibling.nextSibling.find('li').text.strip()"
+            'building_type':"soup.find('div', id='buildingtype').nextSibling.nextSibling.find('li').text.strip()",
+            'nightly': "re.search('\d+',soup.find('div', class_='ratePeriodTitle', text=re.compile('standard', re.IGNORECASE)).parent.parent.find('td', class_='nightly').find(class_='rate').text).group()",
+            'weekend_night': "re.search('\d+',soup.find('div', class_='ratePeriodTitle', text=re.compile('standard', re.IGNORECASE)).parent.parent.find('td', class_='weekendNight').find(class_='rate').text).group()",
+            'property_protection_fee':"re.search('\d+', soup.find(class_='additionalInfo').find(text=re.compile('property protection', re.IGNORECASE)).parent.nextSibling.nextSibling.text).group()",
+            'cleaning_fee':"re.search('\d+', soup.find(class_='additionalInfo').find(text=re.compile('cleaning fee', re.IGNORECASE)).parent.nextSibling.nextSibling.text).group()",
+            'tax_rate':"re.search('\d+[.]?\d*%', soup.find(class_='additionalInfo').find(text=re.compile('tax rate', re.IGNORECASE)).parent.nextSibling.nextSibling.text).group()",
+            'city':"self.cur_city",
         }
 
         for attr, code in LISTING_ATTRS.items():
@@ -398,12 +426,9 @@ class CityScrape:
                 logging.error("Could not get page {}. Re-trying...".format(url))
                 time.sleep(2)
             except Exception as e:
-                logging.error("Unknown error occurred when requesting {}.  {}".format(url, e))
+                logging.error("Unknown error occurred when requesting {}.\n {}".format(url, e))
                 time.sleep(2)
         return resp
-
-
-
 
 
 def main():

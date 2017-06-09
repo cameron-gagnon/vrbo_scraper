@@ -22,56 +22,32 @@ class CityScrape:
     LARGE_PAGE_SIZE = 100000
 
 
-    CITY_LIST = [ ("New York", "NY",),
-                  ("Bridgeport", "CT",),
-                  ("Stamford", "CT",),
-                  ("Kingston", "NY",),
-                  ("Newark", "NJ",),
-                  ("Edison", "NJ",),
-                  ("Torrington", "CT",),
-                  ("Trenton", "NJ",),
-                  ("Ewing", "NJ",),
-                  ("San Francisco", "CA",),
-                  ("San Jose", "CA",),
-                  ("Oakland", "CA",),
-                  ("Napa", "CA",),
-                  ("Fremont", "CA",),
-                  ("Sunnyvale", "CA",),
-                  ("Santa Clara", "CA",),
-                  ("Santa Cruz", "CA",),
-                  ("Watsonville", "CA",),
-                  ("Santa Rosa", "CA",),
-                  ("Petaluma", "CA",),
-                  ("Vallejo", "CA",),
-                  ("Fairfield", "CA",),
-                  ("Philidelphia", "PA",),
-                  ("Camden", "PA",),
-                  ("Vineland", "PA",),
-                  ("Los Angeles", "CA",),
-                  ("Long Beach", "CA",),
-                  ("Santa Ana", "CA",),
-                  ("Oxnard", "CA",),
-                  ("Thousand Oaks", "CA",),
-                  ("Ventura", "CA",),
-                  ("Riverside", "CA",),
-                  ("San Bernadino", "CA",),
-                  ("Ontario", "CA",),
-                  ("Phoenix", "AZ",),
-                  ("Portland", "OR",),
-                  ("Vancouver", "WA",),
-                  ("Hillsboro", "OR",),
-                  ("Cleaveland", "OH",),
-                  ("Akron", "OH",),
-                  ("Elyria", "OH",),
-                  ("Boulder", "CO",),
-                  ("Denver", "CO",),
-                  ("Aurora", "CO",),
-                  ("Boulder", "CO",),
-                  ("New Orleans", "LA",),
-                  ("Metairie", "LA",),
-                  ("Hammond", "MS",),
-                  ("Charlotte", "NC",),
-                  ("Concord", "SC",) ]
+    CITY_LIST = [ ("Gastonia", "NC",),
+                  ("Albemarle", "NC",),
+                  ("Durham", "NC",),
+                  ("Rraleigh", "NC",),
+                  ("Myrtle Bech", "SC",),
+                  ("Conway", "SC",),
+                  ("Charleston", "SC",),
+                  ("Wilmington", "NC",),
+                  ("Georgetown", "SC",),
+                  ("North Myrtle Beach", "SC",),
+                  ("Virginia Beach", "VA",),
+                  ("Norfolk", "VA",),
+                  ("Newport News", "VA",),
+                  ("Hampton", "VA",),
+                  ("Elizabeth City", "NC",),
+                  ("Kill Devil Hills", "NC",),
+                  ("Savannah", "GA",),
+                  ("Hinesville", "GA",),
+                  ("Fort Stewart", "GA",),
+                  ("Dallas", "TX",),
+                  ("Fort Worth", "TX",),
+                  ("Austin", "TX",),
+                  ("Houston", "TX",),
+                  ("Washington", "DC",),
+                  ("Chicago", "IL",),
+                  ("Evanston", "IL",)]
 
     def __init__(self):
         self.set_logging_config()
@@ -79,7 +55,7 @@ class CityScrape:
 
     def read_config(self):
         self.config = configparser.ConfigParser()
-        self.config.read('last_info.ini')
+        self.config.read('last_info2.ini')
         self.last_city_num = self.config.getint('info', 'last_city_num')
         self.last_href_num = self.config.getint('info','last_href_num')
 
@@ -160,7 +136,7 @@ class CityScrape:
         logging.basicConfig(level=logging.INFO,
                             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
                             datefmt='%m-%d %H:%M',
-                            filename='logfile.log',
+                            filename='logfile2.log',
                             filemode='w')
         # define a Handler which writes INFO messages or higher to the sys.stderr
         self.console = logging.StreamHandler()
